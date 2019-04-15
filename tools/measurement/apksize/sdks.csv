@@ -2,3 +2,7 @@ database-aggressive:4
 firestore-aggressive:1
 functions-aggressive:2
 storage-aggressive:3
+firestore-release:5
+functions-release:6
+storage-release:7
+database-release:8

@@ -39,7 +39,7 @@ public class GenerateMeasurementsTaskTest {
             throw new AssertionError("Smoke test for generate failed", result.getFailure())
         }
 
-	assertTrue(Files.exists(testProject.getApkSizeReportPath()))
+        assertTrue(Files.exists(testProject.getApkSizeReportPath()))
     }
 
     @Test
@@ -50,7 +50,7 @@ public class GenerateMeasurementsTaskTest {
             throw new AssertionError("Smoke test for generate failed", result.getFailure())
         }
 
-	assertFalse(Files.exists(testProject.getApkSizeReportPath()))
-        assertTrue("Output missing `APK Sizes`", result.getOutput().contains("APK Sizes"))
+        assertFalse(Files.exists(testProject.getApkSizeReportPath()))
+        assertTrue("Output missing `ApkSizes`", result.getOutput().contains("ApkSizes"))
     }
 }
