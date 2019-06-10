@@ -60,12 +60,12 @@ import javax.annotation.Nullable;
  * the EventManager, LocalStore, and RemoteStore. Some of SyncEngine's responsibilities include:
  *
  * <ol>
- *   <li>Coordinating client requests and remote events between the EventManager and the local and
- *       remote data stores.
- *   <li>Managing a View object for each query, providing the unified view between the local and
- *       remote data stores.
- *   <li>Notifying the RemoteStore when the LocalStore has new mutations in its queue that need
- *       sending to the backend.
+ * <li>Coordinating client requests and remote events between the EventManager and the local and
+ * remote data stores.
+ * <li>Managing a View object for each query, providing the unified view between the local and
+ * remote data stores.
+ * <li>Notifying the RemoteStore when the LocalStore has new mutations in its queue that need
+ * sending to the backend.
  * </ol>
  *
  * <p>The SyncEngine’s methods should only ever be called by methods running on our own worker
@@ -73,71 +73,46 @@ import javax.annotation.Nullable;
  */
 public class SyncEngine implements RemoteStore.RemoteStoreCallback {
 
-  /** Tracks a limbo resolution. */
-  private static class LimboResolution {
-    private final DocumentKey key;
-
-    /**
-     * Set to true once we've received a document. This is used in getRemoteKeysForTarget() and
-     * ultimately used by WatchChangeAggregator to decide whether it needs to manufacture a delete
-     * event for the target once the target is CURRENT.
-     */
-    private boolean receivedDocument;
-
-    LimboResolution(DocumentKey key) {
-      this.key = key;
-    }
-  }
-
   private static final String TAG = SyncEngine.class.getSimpleName();
-
-  /** Interface implemented by EventManager to handle notifications from SyncEngine. */
-  interface SyncEngineCallback {
-    /** Handles new view snapshots. */
-    void onViewSnapshots(List<ViewSnapshot> snapshotList);
-
-    /** Handles the failure of a query. */
-    void onError(Query query, Status error);
-
-    /** Handles a change in online state. */
-    void handleOnlineStateChange(OnlineState onlineState);
-  }
-
-  /** The local store, used to persist mutations and cached documents. */
+  /**
+   * The local store, used to persist mutations and cached documents.
+   */
   private final LocalStore localStore;
-
-  /** The remote store for sending writes, watches, etc. to the backend. */
+  /**
+   * The remote store for sending writes, watches, etc. to the backend.
+   */
   private final RemoteStore remoteStore;
-
-  /** QueryViews for all active queries, indexed by query. */
+  /**
+   * QueryViews for all active queries, indexed by query.
+   */
   private final Map<Query, QueryView> queryViewsByQuery;
-
-  /** QueryViews for all active queries, indexed by target ID. */
+  /**
+   * QueryViews for all active queries, indexed by target ID.
+   */
   private final Map<Integer, QueryView> queryViewsByTarget;
-
   /**
    * When a document is in limbo, we create a special listen to resolve it. This maps the
    * DocumentKey of each limbo document to the target ID of the listen resolving it.
    */
   private final Map<DocumentKey, Integer> limboTargetsByKey;
-
   /**
    * Basically the inverse of limboTargetsByKey, a map of target ID to a LimboResolution (which
    * includes the DocumentKey as well as whether we've received a document for the target).
    */
   private final Map<Integer, LimboResolution> limboResolutionsByTarget;
-
-  /** Used to track any documents that are currently in limbo. */
+  /**
+   * Used to track any documents that are currently in limbo.
+   */
   private final ReferenceSet limboDocumentRefs;
-
-  /** Stores user completion blocks, indexed by user and batch ID. */
+  /**
+   * Stores user completion blocks, indexed by user and batch ID.
+   */
   private final Map<User, Map<Integer, TaskCompletionSource<Void>>> mutationUserCallbacks;
-
-  /** Used for creating the target IDs for the listens used to resolve limbo documents. */
+  /**
+   * Used for creating the target IDs for the listens used to resolve limbo documents.
+   */
   private final TargetIdGenerator targetIdGenerator;
-
   private User currentUser;
-
   private SyncEngineCallback syncEngineListener;
 
   public SyncEngine(LocalStore localStore, RemoteStore remoteStore, User initialUser) {
@@ -203,7 +178,9 @@ public class SyncEngine implements RemoteStore.RemoteStoreCallback {
     return viewChange.getSnapshot();
   }
 
-  /** Stops listening to a query previously listened to via listen. */
+  /**
+   * Stops listening to a query previously listened to via listen.
+   */
   void stopListening(Query query) {
     assertCallback("stopListening");
 
@@ -247,7 +224,8 @@ public class SyncEngine implements RemoteStore.RemoteStoreCallback {
    * of the data referenced, then the updateFunction will be called again. If the updateFunction
    * still fails after the given number of retries, then the transaction will be rejected.
    *
-   * <p>The transaction object passed to the updateFunction contains methods for accessing documents
+   * <p>The transaction object passed to the updateFunction contains methods for accessing
+   * documents
    * and collections. Unlike other datastore access, data accessed with the transaction will not
    * reflect local changes that have not been committed. For this reason, it is required that all
    * reads are performed before any writes. Transactions must be performed while online.
@@ -288,7 +266,41 @@ public class SyncEngine implements RemoteStore.RemoteStoreCallback {
             });
   }
 
-  /** Called by FirestoreClient to notify us of a new remote event. */
+  public <TResult> Task<TResult> serverTransaction(
+      AsyncQueue asyncQueue, Function<ServerTransaction, Task<TResult>> updateFunction,
+      int retries) {
+    hardAssert(retries >= 0, "Got negative number of retries for transaction.");
+    final ServerTransaction transaction = remoteStore.createServerTransaction();
+
+    return transaction
+        .begin()
+        .continueWithTask(
+            asyncQueue.getExecutor(),
+            beginTask -> {
+              if (!beginTask.isSuccessful()) {
+                return Tasks.forException(
+                    new FirebaseFirestoreException(
+                        "Could not start transaction",
+                        Code.ABORTED));
+              }
+
+              return updateFunction
+                  .apply(transaction)
+                  .continueWithTask(
+                      asyncQueue.getExecutor(),
+                      userTask -> {
+                        if (!userTask.isSuccessful()) {
+                          return userTask;
+                        }
+
+                        return Tasks.forResult(userTask.getResult());
+                      });
+            });
+  }
+
+  /**
+   * Called by FirestoreClient to notify us of a new remote event.
+   */
   @Override
   public void handleRemoteEvent(RemoteEvent event) {
     assertCallback("handleRemoteEvent");
@@ -303,8 +315,8 @@ public class SyncEngine implements RemoteStore.RemoteStoreCallback {
         // added, modified, or removed, but not a combination.
         hardAssert(
             targetChange.getAddedDocuments().size()
-                    + targetChange.getModifiedDocuments().size()
-                    + targetChange.getRemovedDocuments().size()
+                + targetChange.getModifiedDocuments().size()
+                + targetChange.getRemovedDocuments().size()
                 <= 1,
             "Limbo resolution for single document contains multiple changes.");
         if (targetChange.getAddedDocuments().size() > 0) {
@@ -328,7 +340,9 @@ public class SyncEngine implements RemoteStore.RemoteStoreCallback {
     emitNewSnapsAndNotifyLocalStore(changes, event);
   }
 
-  /** Applies an OnlineState change to the sync engine and notifies any views of the change. */
+  /**
+   * Applies an OnlineState change to the sync engine and notifies any views of the change.
+   */
   @Override
   public void handleOnlineStateChange(OnlineState onlineState) {
     ArrayList<ViewSnapshot> newViewSnapshots = new ArrayList<>();
@@ -358,7 +372,9 @@ public class SyncEngine implements RemoteStore.RemoteStoreCallback {
     }
   }
 
-  /** Called by FirestoreClient to notify us of a rejected listen. */
+  /**
+   * Called by FirestoreClient to notify us of a rejected listen.
+   */
   @Override
   public void handleRejectedListen(int targetId, Status error) {
     assertCallback("handleRejectedListen");
@@ -432,7 +448,9 @@ public class SyncEngine implements RemoteStore.RemoteStoreCallback {
     emitNewSnapsAndNotifyLocalStore(changes, /*remoteEvent=*/ null);
   }
 
-  /** Resolves the task corresponding to this write result. */
+  /**
+   * Resolves the task corresponding to this write result.
+   */
   private void notifyUser(int batchId, @Nullable Status status) {
     Map<Integer, TaskCompletionSource<Void>> userTasks = mutationUserCallbacks.get(currentUser);
 
@@ -515,7 +533,9 @@ public class SyncEngine implements RemoteStore.RemoteStoreCallback {
     localStore.notifyLocalViewChanges(documentChangesInAllViews);
   }
 
-  /** Updates the limbo document state for the given targetId. */
+  /**
+   * Updates the limbo document state for the given targetId.
+   */
   private void updateTrackedLimboDocuments(List<LimboDocumentChange> limboChanges, int targetId) {
     for (LimboDocumentChange limboChange : limboChanges) {
       switch (limboChange.getType()) {
@@ -595,5 +615,45 @@ public class SyncEngine implements RemoteStore.RemoteStoreCallback {
     }
 
     return false;
+  }
+
+  /**
+   * Interface implemented by EventManager to handle notifications from SyncEngine.
+   */
+  interface SyncEngineCallback {
+
+    /**
+     * Handles new view snapshots.
+     */
+    void onViewSnapshots(List<ViewSnapshot> snapshotList);
+
+    /**
+     * Handles the failure of a query.
+     */
+    void onError(Query query, Status error);
+
+    /**
+     * Handles a change in online state.
+     */
+    void handleOnlineStateChange(OnlineState onlineState);
+  }
+
+  /**
+   * Tracks a limbo resolution.
+   */
+  private static class LimboResolution {
+
+    private final DocumentKey key;
+
+    /**
+     * Set to true once we've received a document. This is used in getRemoteKeysForTarget() and
+     * ultimately used by WatchChangeAggregator to decide whether it needs to manufacture a delete
+     * event for the target once the target is CURRENT.
+     */
+    private boolean receivedDocument;
+
+    LimboResolution(DocumentKey key) {
+      this.key = key;
+    }
   }
 }

@@ -19,17 +19,31 @@ import com.google.android.gms.tasks.Task;
 import com.google.firebase.firestore.FirebaseFirestoreException;
 import com.google.firebase.firestore.auth.CredentialsProvider;
 import com.google.firebase.firestore.core.DatabaseInfo;
+import com.google.firebase.firestore.core.Query;
+import com.google.firebase.firestore.model.Document;
 import com.google.firebase.firestore.model.DocumentKey;
 import com.google.firebase.firestore.model.MaybeDocument;
 import com.google.firebase.firestore.model.SnapshotVersion;
 import com.google.firebase.firestore.model.mutation.Mutation;
 import com.google.firebase.firestore.model.mutation.MutationResult;
+import com.google.firebase.firestore.model.value.ObjectValue;
 import com.google.firebase.firestore.util.AsyncQueue;
 import com.google.firestore.v1.BatchGetDocumentsRequest;
 import com.google.firestore.v1.BatchGetDocumentsResponse;
+import com.google.firestore.v1.BeginTransactionRequest;
+import com.google.firestore.v1.BeginTransactionResponse;
 import com.google.firestore.v1.CommitRequest;
 import com.google.firestore.v1.CommitResponse;
 import com.google.firestore.v1.FirestoreGrpc;
+import com.google.firestore.v1.GetDocumentRequest;
+import com.google.firestore.v1.RunQueryRequest;
+import com.google.firestore.v1.RunQueryResponse;
+import com.google.firestore.v1.StructuredQuery;
+import com.google.firestore.v1.Target.QueryTarget;
+import com.google.firestore.v1.TransactionOptions;
+import com.google.firestore.v1.TransactionOptions.Builder;
+import com.google.firestore.v1.TransactionOptions.ReadOnly;
+import com.google.protobuf.ByteString;
 import io.grpc.Status;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -150,7 +164,7 @@ public class Datastore {
               if (!task.isSuccessful()) {
                 if (task.getException() instanceof FirebaseFirestoreException
                     && ((FirebaseFirestoreException) task.getException()).getCode()
-                        == FirebaseFirestoreException.Code.UNAUTHENTICATED) {
+                    == FirebaseFirestoreException.Code.UNAUTHENTICATED) {
                   channel.invalidateToken();
                 }
               }
@@ -167,6 +181,90 @@ public class Datastore {
               }
               return results;
             });
+  }
+
+  public Task<Document> lookupWithTransaction(DocumentKey key, ByteString transaction) {
+    GetDocumentRequest.Builder builder = GetDocumentRequest.newBuilder();
+    builder.setTransaction(transaction);
+    builder.setName(serializer.encodeKey(key));
+
+    return channel
+        .runRpc(FirestoreGrpc.getGetDocumentMethod(), builder.build())
+        .continueWith(
+            workerQueue.getExecutor(),
+            task -> {
+              if (!task.isSuccessful()) {
+                if (task.getException() instanceof FirebaseFirestoreException
+                    && ((FirebaseFirestoreException) task.getException()).getCode()
+                    == FirebaseFirestoreException.Code.UNAUTHENTICATED) {
+                  channel.invalidateToken();
+                }
+              }
+
+              return serializer.decodeGetDocument(task.getResult());
+            }
+        );
+  }
+
+  public Task<ByteString> beginReadOnlyTransaction() {
+    TransactionOptions.Builder transactionBuilder = TransactionOptions.newBuilder();
+    transactionBuilder.setReadOnly(ReadOnly.getDefaultInstance());
+
+    BeginTransactionRequest.Builder builder = BeginTransactionRequest.newBuilder();
+    builder.setDatabase(serializer.databaseName());
+    builder.setOptions(transactionBuilder);
+
+    return channel
+        .runRpc(FirestoreGrpc.getBeginTransactionMethod(), builder.build())
+        .continueWith(
+            workerQueue.getExecutor(),
+            task -> {
+              if (!task.isSuccessful()) {
+                if (task.getException() instanceof FirebaseFirestoreException
+                    && ((FirebaseFirestoreException) task.getException()).getCode()
+                    == FirebaseFirestoreException.Code.UNAUTHENTICATED) {
+                  channel.invalidateToken();
+                }
+              }
+
+              BeginTransactionResponse result = task.getResult();
+              return result.getTransaction();
+            }
+        );
+  }
+
+  public Task<List<Document>> query(Query query, ByteString transaction) {
+    QueryTarget target = serializer.encodeQueryTarget(query);
+
+    RunQueryRequest.Builder builder = RunQueryRequest.newBuilder();
+    builder.setTransaction(transaction);
+    builder.setStructuredQuery(target.getStructuredQuery());
+    builder.setParent(target.getParent());
+
+    return channel
+        .runStreamingResponseRpc(FirestoreGrpc.getRunQueryMethod(), builder.build())
+        .continueWith(
+            workerQueue.getExecutor(),
+            task -> {
+              if (!task.isSuccessful()) {
+                if (task.getException() instanceof FirebaseFirestoreException
+                    && ((FirebaseFirestoreException) task.getException()).getCode()
+                    == FirebaseFirestoreException.Code.UNAUTHENTICATED) {
+                  channel.invalidateToken();
+                }
+              }
+
+              List<RunQueryResponse> responses = task.getResult();
+              List<Document> documents = new ArrayList<>(responses.size());
+              for (RunQueryResponse response : responses) {
+                if (response.hasDocument()) {
+                  documents.add(serializer.decodeGetDocument(response.getDocument()));
+                }
+              }
+
+              return documents;
+            }
+        );
   }
 
   /**

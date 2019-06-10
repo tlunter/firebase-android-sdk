@@ -225,6 +225,15 @@ public final class FirestoreClient implements RemoteStore.RemoteStoreCallback {
         () -> syncEngine.transaction(asyncQueue, updateFunction, retries));
   }
 
+  /** Tries to execute the transaction in updateFunction up to retries times. */
+  public <TResult> Task<TResult> serverTransaction(
+      Function<ServerTransaction, Task<TResult>> updateFunction, int retries) {
+    this.verifyNotShutdown();
+    return AsyncQueue.callTask(
+        asyncQueue.getExecutor(),
+        () -> syncEngine.serverTransaction(asyncQueue, updateFunction, retries));
+  }
+
   private void initialize(Context context, User user, boolean usePersistence, long cacheSizeBytes) {
     // Note: The initialization work must all be synchronous (we can't dispatch more work) since
     // external write/listen operations could get queued to run before that subsequent work

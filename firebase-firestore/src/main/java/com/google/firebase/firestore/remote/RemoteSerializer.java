@@ -33,6 +33,7 @@ import com.google.firebase.firestore.local.QueryData;
 import com.google.firebase.firestore.local.QueryPurpose;
 import com.google.firebase.firestore.model.DatabaseId;
 import com.google.firebase.firestore.model.Document;
+import com.google.firebase.firestore.model.Document.DocumentState;
 import com.google.firebase.firestore.model.DocumentKey;
 import com.google.firebase.firestore.model.FieldPath;
 import com.google.firebase.firestore.model.MaybeDocument;
@@ -389,6 +390,20 @@ public final class RemoteSerializer {
       builder.putFields(entry.getKey(), encodeValue(entry.getValue()));
     }
     return builder.build();
+  }
+
+  public Document decodeGetDocument(com.google.firestore.v1.Document document) {
+    DocumentKey key = decodeKey(document.getName());
+    ObjectValue value = decodeFields(document.getFieldsMap());
+    SnapshotVersion version = decodeVersion(document.getUpdateTime());
+
+    return new Document(
+        key,
+        version,
+        value,
+        DocumentState.SYNCED,
+        document
+    );
   }
 
   public MaybeDocument decodeMaybeDocument(BatchGetDocumentsResponse response) {

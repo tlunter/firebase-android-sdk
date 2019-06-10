@@ -297,6 +297,33 @@ public class FirebaseFirestore {
         updateFunction, com.google.firebase.firestore.core.Transaction.getDefaultExecutor());
   }
 
+  private <TResult> Task<TResult> runServerTransaction(
+      ServerTransaction.Function<TResult> updateFunction, Executor executor) {
+    ensureClientConfigured();
+
+    // We wrap the function they provide in order to
+    // 1. Use internal implementation classes for Transaction,
+    // 2. Convert exceptions they throw into Tasks, and
+    // 3. Run the user callback on the user queue.
+    Function<com.google.firebase.firestore.core.ServerTransaction, Task<TResult>> wrappedUpdateFunction =
+        internalTransaction ->
+            Tasks.call(
+                executor,
+                () ->
+                  updateFunction.apply(
+                      new ServerTransaction(internalTransaction, FirebaseFirestore.this)));
+
+    return client.serverTransaction(wrappedUpdateFunction, 5);
+  }
+
+  @NonNull
+  @PublicApi
+  public <TResult> Task<TResult> runServerTransaction(
+      @NonNull ServerTransaction.Function<TResult> updateFunction) {
+    return runServerTransaction(
+        updateFunction, com.google.firebase.firestore.core.ServerTransaction.getDefaultExecutor());
+  }
+
   /**
    * Creates a write batch, used for performing multiple writes as a single atomic operation.
    *

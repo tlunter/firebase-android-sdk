@@ -20,6 +20,7 @@ import android.support.annotation.Nullable;
 import android.support.annotation.VisibleForTesting;
 import com.google.firebase.database.collection.ImmutableSortedSet;
 import com.google.firebase.firestore.core.OnlineState;
+import com.google.firebase.firestore.core.ServerTransaction;
 import com.google.firebase.firestore.core.Transaction;
 import com.google.firebase.firestore.local.LocalStore;
 import com.google.firebase.firestore.local.QueryData;
@@ -713,6 +714,10 @@ public final class RemoteStore implements WatchChangeAggregator.TargetMetadataPr
 
   public Transaction createTransaction() {
     return new Transaction(datastore);
+  }
+
+  public ServerTransaction createServerTransaction() {
+    return new ServerTransaction(datastore);
   }
 
   @Override
